@@ -1,0 +1,128 @@
+name: Vandana Tunes
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout (push)
+        uses: actions/checkout@v4
+        if: github.event_name == 'push'
+        with:
+          fetch-depth: 2
+
+      - name: Checkout (manual)
+        uses: actions/checkout@v4
+        if: github.event_name == 'workflow_dispatch'
+        with:
+          fetch-depth: 0
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+          cache-key: flutter-${{ runner.os }}-${{ hashFiles('pubspec.lock') }}
+
+      - name: Cache pub packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.pub-cache
+          key: pub-${{ runner.os }}-${{ hashFiles('pubspec.lock') }}
+          restore-keys: |
+            pub-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build release APK
+        run: flutter build apk --release
+
+      - name: Rename APK
+        run: mv build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/VandanaTunes.apk
+
+      - name: Collect release metadata
+        id: metadata
+        run: |
+          SHORT_SHA="$(git rev-parse --short HEAD)"
+          VERSION_CODE="${{ github.run_number }}"
+          APK_PATH="build/app/outputs/flutter-apk/VandanaTunes.apk"
+          APK_SIZE="$(du -h "$APK_PATH" | cut -f1)"
+          BUILD_TIME_UTC="$(date -u +"%Y-%m-%d %H:%M UTC")"
+          {
+            echo "short_sha=$SHORT_SHA"
+            echo "version_code=$VERSION_CODE"
+            echo "apk_size=$APK_SIZE"
+            echo "build_time_utc=$BUILD_TIME_UTC"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Generate changelog
+        id: changelog
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "push" ] \
+            && [ -n "${{ github.event.before }}" ] \
+            && [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ] \
+            && git cat-file -e "${{ github.event.before }}"^{commit} 2>/dev/null; then
+            CHANGE_RANGE="${{ github.event.before }}..${{ github.sha }}"
+            CHANGELOG="$(git log "$CHANGE_RANGE" --pretty=format:'- %s (%h)')"
+          else
+            CHANGELOG="$(git log -10 --pretty=format:'- %s (%h)')"
+          fi
+
+          if [ -z "$CHANGELOG" ]; then
+            CHANGELOG="- No commit summary available for this build."
+          fi
+
+          {
+            echo "content<<EOF"
+            echo "$CHANGELOG"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Publish continuous release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: continuous
+          name: Continuous Sideload Build
+          commit: ${{ github.sha }}
+          prerelease: true
+          allowUpdates: true
+          removeArtifacts: true
+          artifactErrorsFailBuild: true
+          artifacts: build/app/outputs/flutter-apk/VandanaTunes.apk
+          body: |
+            Automated Android sideload build for VandanaTunes.
+
+            Note:
+            - This workflow currently builds the repo's existing release APK configuration.
+            - Until a real release keystore is configured in GitHub secrets, treat this as a sideload build rather than a store-ready production release.
+
+            - Version: `${{ steps.metadata.outputs.short_sha }}`
+            - Version code: `${{ steps.metadata.outputs.version_code }}`
+            - Commit: `${{ github.sha }}`
+            - Short SHA: `${{ steps.metadata.outputs.short_sha }}`
+            - Branch: `${{ github.ref_name }}`
+            - APK size: `${{ steps.metadata.outputs.apk_size }}`
+            - Built at: `${{ steps.metadata.outputs.build_time_utc }}`
+            - Workflow run: `${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`
+
+            What's new:
+            ${{ steps.changelog.outputs.content }}
+
+            Files:
+            - `VandanaTunes.apk`

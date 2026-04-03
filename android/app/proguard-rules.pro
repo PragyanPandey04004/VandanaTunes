@@ -1,0 +1,13 @@
+-dontwarn com.google.re2j.Matcher
+-dontwarn com.google.re2j.Pattern
+-dontwarn java.beans.BeanDescriptor
+-dontwarn java.beans.BeanInfo
+-dontwarn java.beans.IntrospectionException
+-dontwarn java.beans.Introspector
+-dontwarn java.beans.PropertyDescriptor
+-dontwarn javax.script.ScriptEngineFactory
+
+-keep class androidx.media3.common.** { *; }
+-keep class androidx.media3.session.** { *; }
+-keep class androidx.media3.exoplayer.** { *; }
+-keep class org.schabi.newpipe.extractor.** { *; }
